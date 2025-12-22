@@ -3,201 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ranking the Stars Live</title>
+    <title>Ranking the Stars ⭐</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
-
-        // --- UPDATED CONFIG ---
-        const firebaseConfig = {
-            apiKey: "AIzaSyBBFLAz3arcUWPR2zu_ah97OpQrP52NFWU",
-            authDomain: "ranking-the-stars---ci.firebaseapp.com",
-            // This line below is essential for Realtime Database!
-            databaseURL: "https://ranking-the-stars---ci-default-rtdb.firebaseio.com", 
-            projectId: "ranking-the-stars---ci",
-            storageBucket: "ranking-the-stars---ci.firebasestorage.app",
-            messagingSenderId: "944109602386",
-            appId: "1:944109602386:web:605a8f11befdc32d8d418b",
-            measurementId: "G-SWVECSX8ZH"
-        };
-
-        const app = initializeApp(firebaseConfig);
-        const db = getDatabase(app);
-
-        let roomCode = "TEAM_EVENT"; 
-        let myName = localStorage.getItem('player_name') || "";
-        let isHost = false;
-
-        const state = {
-            participants: [],
-            statements: [],
-            currentIndex: -1,
-            submissions: {},
-            status: 'setup'
-        };
-
-        // Listen for data
-        onValue(ref(db, `rooms/${roomCode}`), (snapshot) => {
-            const data = snapshot.val();
-            if (data) {
-                state.participants = data.participants || [];
-                state.statements = data.statements || [];
-                state.currentIndex = data.currentIndex ?? -1;
-                state.status = data.status;
-                state.submissions = data.submissions || {};
-            }
-            render();
-        });
-
-        window.joinGame = () => {
-            const nameInput = document.getElementById('join-name').value.trim();
-            if (!nameInput) return alert("Enter your name");
-            myName = nameInput;
-            localStorage.setItem('player_name', myName);
-            render();
-        };
-
-        window.createGame = async () => {
-            const names = document.getElementById('input-names').value.split('\n').filter(n => n.trim());
-            const qs = document.getElementById('input-statements').value.split('\n').filter(s => s.trim());
-            if (names.length < 2) return alert("Add more names!");
-            
-            isHost = true;
-            await set(ref(db, `rooms/${roomCode}`), {
-                participants: names.map(n => n.trim()),
-                statements: qs.map(q => q.trim()),
-                currentIndex: 0,
-                status: 'ranking'
-            });
-        };
-
-        window.submitRank = async () => {
-            const listItems = Array.from(document.querySelectorAll('#sortable-list li'));
-            const ranking = listItems.map(li => li.dataset.name);
-            const safeName = myName.replace(/[.#$\[\]]/g, "_"); 
-            await set(ref(db, `rooms/${roomCode}/submissions/${state.currentIndex}/${safeName}`), ranking);
-            document.getElementById('ranking-area').innerHTML = `<div class="p-10 text-center font-bold text-indigo-600">Ranking submitted!<br>Waiting for the rest...</div>`;
-        };
-
-        window.nextStep = async () => {
-            if (state.status === 'ranking') {
-                await update(ref(db, `rooms/${roomCode}`), { status: 'discussion' });
-            } else {
-                const nextIdx = state.currentIndex + 1;
-                if (nextIdx >= state.statements.length) {
-                    await update(ref(db, `rooms/${roomCode}`), { status: 'leaderboard' });
-                } else {
-                    await update(ref(db, `rooms/${roomCode}`), { currentIndex: nextIdx, status: 'ranking' });
-                }
-            }
-        };
-
-        function render() {
-            // 1. Show Join View if no name
-            if (!myName) {
-                showSection('view-join');
-                return;
-            }
-
-            // 2. Show Setup View if game hasn't started
-            if (state.currentIndex === -1) {
-                showSection('view-setup');
-                return;
-            }
-
-            // 3. Ranking View
-            if (state.status === 'ranking') {
-                showSection('view-ranking');
-                document.getElementById('curr-q').innerText = state.statements[state.currentIndex];
-                const list = document.getElementById('sortable-list');
-                if (list.children.length === 0) { // Only populate if empty to prevent jumping while dragging
-                    [...state.participants].sort(() => Math.random() - 0.5).forEach(name => {
-                        const li = document.createElement('li');
-                        li.className = "bg-white p-4 mb-2 rounded-lg shadow border flex justify-between touch-none font-bold";
-                        li.dataset.name = name;
-                        li.innerHTML = `<span>${name}</span> <span class="text-slate-300 text-xl">≡</span>`;
-                        list.appendChild(li);
-                    });
-                    new Sortable(list, { animation: 150 });
-                }
-            }
-
-            // 4. Discussion View
-            if (state.status === 'discussion') {
-                showSection('view-discussion');
-                const roundSubs = state.submissions?.[state.currentIndex] || {};
-                const roundTotals = {};
-                state.participants.forEach(p => roundTotals[p] = 0);
-                
-                Object.values(roundSubs).forEach(ranking => {
-                    ranking.forEach((name, index) => {
-                        if(roundTotals[name] !== undefined) roundTotals[name] += (state.participants.length - index);
-                    });
-                });
-
-                const winner = Object.keys(roundTotals).reduce((a, b) => roundTotals[a] > roundTotals[b] ? a : b, state.participants[0]);
-                document.getElementById('round-winner').innerText = winner;
-                document.getElementById('host-controls').classList.toggle('hidden', !isHost);
-            }
-
-            // 5. Leaderboard
-            if (state.status === 'leaderboard') {
-                showSection('view-leaderboard');
-                const totals = {};
-                state.participants.forEach(p => totals[p] = 0);
-                Object.values(state.submissions || {}).forEach(round => {
-                    Object.values(round).forEach(ranking => {
-                        ranking.forEach((name, index) => {
-                            if(totals[name] !== undefined) totals[name] += (state.participants.length - index);
-                        });
-                    });
-                });
-                const sorted = Object.entries(totals).sort((a,b) => b[1] - a[1]);
-                document.getElementById('final-list').innerHTML = sorted.map(([name, pts], i) => `
-                    <div class="flex justify-between p-4 border-b">
-                        <span>${i+1}. <b>${name}</b></span>
-                        <span class="text-indigo-600 font-bold">${pts} pts</span>
-                    </div>
-                `).join('');
-            }
-        }
-
-        function showSection(id) {
-            document.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
-            document.getElementById(id).classList.remove('hidden');
-        }
-
-        // START THE APP
-        render();
-
-    </script>
 </head>
 <body class="bg-slate-100 text-slate-900 font-sans">
+
+    <!-- Debugging message (hidden by default) -->
+    <div id="debug-log" class="text-red-600 p-2 text-[10px] font-mono whitespace-pre-wrap"></div>
+
     <div id="app" class="max-w-md mx-auto p-4">
         
+        <!-- 1. JOIN VIEW -->
         <section id="view-join" class="hidden py-20 text-center">
             <h1 class="text-3xl font-black mb-6 text-indigo-600">Ranking the Stars ⭐</h1>
             <input id="join-name" type="text" placeholder="Your Name" class="w-full p-4 rounded-xl border mb-4 text-center text-lg shadow-sm">
-            <button onclick="joinGame()" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-bold shadow-lg active:scale-95 transition">Join Game</button>
-            <button onclick="document.getElementById('view-setup').classList.remove('hidden'); document.getElementById('view-join').classList.add('hidden');" class="text-xs text-slate-400 underline mt-10 block w-full text-center">I am the Host (Setup)</button>
+            <button onclick="window.joinGame()" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-bold shadow-lg active:scale-95 transition">Join Game</button>
+            <button onclick="window.showSection('view-setup')" class="text-xs text-slate-400 underline mt-10 block w-full">I am the Host (Setup)</button>
         </section>
 
+        <!-- 2. SETUP VIEW (Only Host uses this) -->
         <section id="view-setup" class="hidden space-y-4">
             <h2 class="text-xl font-bold">Host Setup</h2>
-            <p class="text-sm text-slate-500">Configure the game for everyone.</p>
+            <p class="text-sm text-slate-500">Add participants and statements, then click Launch.</p>
             <div>
                 <label class="text-xs font-bold uppercase">Participants (one per line)</label>
                 <textarea id="input-names" rows="5" class="w-full p-2 border rounded">Alex\nJordan\nTaylor\nCharlie\nCasey\nSam\nRobin\nMorgan\nKelly\nPat\nJessie\nDana</textarea>
             </div>
             <div>
                 <label class="text-xs font-bold uppercase">Statements</label>
-                <textarea id="input-statements" rows="3" class="w-full p-2 border rounded">Who is most likely to be late?\nWho is the best dancer?\nWho is most likely to win a reality show?</textarea>
+                <textarea id="input-statements" rows="3" class="w-full p-2 border rounded">Who is most likely to be late?\nWho is the best dancer?\nWho would survive a zombie apocalypse?</textarea>
             </div>
-            <button onclick="createGame()" class="w-full bg-black text-white p-4 rounded-xl font-bold">Launch Game for Everyone</button>
+            <button onclick="window.createGame()" class="w-full bg-black text-white p-4 rounded-xl font-bold">Launch Game for Everyone</button>
         </section>
 
+        <!-- 3. RANKING VIEW -->
         <section id="view-ranking" class="hidden">
             <div class="bg-indigo-600 text-white p-6 rounded-2xl mb-6 shadow-lg">
                 <p class="text-xs opacity-75 uppercase mb-1">Statement:</p>
@@ -205,29 +45,204 @@
             </div>
             <div id="ranking-area">
                 <p class="text-center text-sm text-slate-500 mb-4 italic">Drag the most likely person to the top!</p>
-                <ul id="sortable-list" class="mb-6"></ul>
-                <button onclick="submitRank()" class="w-full bg-green-500 text-white p-4 rounded-xl font-bold shadow-md">Submit My Ranking</button>
+                <ul id="sortable-list" class="mb-6 min-h-[100px]"></ul>
+                <button onclick="window.submitRank()" class="w-full bg-green-500 text-white p-4 rounded-xl font-bold shadow-md">Submit My Ranking</button>
             </div>
         </section>
 
+        <!-- 4. DISCUSSION VIEW -->
         <section id="view-discussion" class="hidden text-center py-10">
-            <h2 class="text-xl font-bold mb-4">The Group's Consensus:</h2>
+            <h2 class="text-xl font-bold mb-4">The Group Consensus:</h2>
             <div class="bg-yellow-100 border-4 border-yellow-400 p-8 rounded-3xl mb-8">
                 <p class="text-yellow-800 uppercase text-xs font-black tracking-widest mb-2">Ranked #1 Overall</p>
-                <p id="round-winner" class="text-5xl font-black text-yellow-900"></p>
+                <p id="round-winner" class="text-4xl font-black text-yellow-900 leading-tight"></p>
             </div>
-            <div id="host-controls" class="hidden">
-                <button onclick="nextStep()" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-bold">Next Question</button>
+            <p class="italic text-slate-500 mb-10">"Why does everyone think it's this person?"</p>
+            <div id="host-controls" class="hidden border-t pt-6">
+                <button onclick="window.nextStep()" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-bold shadow-lg">Next Statement ➔</button>
             </div>
-            <p class="text-sm text-slate-400 mt-4">Waiting for host to proceed...</p>
+            <p id="player-wait-msg" class="text-sm text-slate-400 mt-4">Waiting for host to proceed...</p>
         </section>
 
+        <!-- 5. LEADERBOARD VIEW -->
         <section id="view-leaderboard" class="hidden">
             <h2 class="text-3xl font-black text-center mb-8">Final Results 🏆</h2>
             <div id="final-list" class="bg-white rounded-2xl shadow overflow-hidden"></div>
-            <button onclick="location.reload()" class="w-full mt-10 text-slate-400">Restart App</button>
+            <button onclick="location.reload()" class="w-full mt-10 text-slate-400 underline">Restart Game</button>
         </section>
 
     </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+        // CONFIGURATION WITH YOUR EXACT DETAILS
+        const firebaseConfig = {
+            apiKey: "AIzaSyBBFLAz3arcUWPR2zu_ah97OpQrP52NFWU",
+            authDomain: "ranking-the-stars---ci.firebaseapp.com",
+            databaseURL: "https://ranking-the-stars---ci-default-rtdb.europe-west1.firebasedatabase.app/",
+            projectId: "ranking-the-stars---ci",
+            storageBucket: "ranking-the-stars---ci.firebasestorage.app",
+            messagingSenderId: "944109602386",
+            appId: "1:944109602386:web:605a8f11befdc32d8d418b"
+        };
+
+        try {
+            const app = initializeApp(firebaseConfig);
+            const db = getDatabase(app);
+            const roomCode = "TEAM_EVENT";
+
+            let myName = localStorage.getItem('player_name') || "";
+            let isHost = false;
+            let state = { participants: [], statements: [], currentIndex: -1, status: 'setup', submissions: {} };
+
+            // Listen for Database Updates
+            onValue(ref(db, `rooms/${roomCode}`), (snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    state.participants = data.participants || [];
+                    state.statements = data.statements || [];
+                    state.currentIndex = data.currentIndex ?? -1;
+                    state.status = data.status || 'setup';
+                    state.submissions = data.submissions || {};
+                }
+                render();
+            }, (error) => {
+                document.getElementById('debug-log').innerText = "Firebase Connection Error: " + error.message;
+            });
+
+            // Global Functions
+            window.showSection = (id) => {
+                document.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
+                document.getElementById(id).classList.remove('hidden');
+            };
+
+            window.joinGame = () => {
+                const nameInput = document.getElementById('join-name').value.trim();
+                if (!nameInput) return alert("Please enter your name!");
+                myName = nameInput;
+                localStorage.setItem('player_name', myName);
+                render();
+            };
+
+            window.createGame = async () => {
+                isHost = true;
+                const names = document.getElementById('input-names').value.split('\n').filter(n => n.trim());
+                const qs = document.getElementById('input-statements').value.split('\n').filter(s => s.trim());
+                if (names.length < 2) return alert("Need at least 2 participants!");
+                
+                await set(ref(db, `rooms/${roomCode}`), {
+                    participants: names,
+                    statements: qs,
+                    currentIndex: 0,
+                    status: 'ranking',
+                    submissions: {}
+                });
+            };
+
+            window.submitRank = async () => {
+                const listItems = Array.from(document.querySelectorAll('#sortable-list li'));
+                const ranking = listItems.map(li => li.dataset.name);
+                const safeName = myName.replace(/[.#$\[\]]/g, "_");
+                
+                await set(ref(db, `rooms/${roomCode}/submissions/${state.currentIndex}/${safeName}`), ranking);
+                document.getElementById('ranking-area').innerHTML = `<div class="p-10 text-center font-bold text-indigo-600">Ranking sent!<br>Wait for everyone else...</div>`;
+            };
+
+            window.nextStep = async () => {
+                if (state.status === 'ranking') {
+                    await update(ref(db, `rooms/${roomCode}`), { status: 'discussion' });
+                } else {
+                    const nextIdx = state.currentIndex + 1;
+                    if (nextIdx >= state.statements.length) {
+                        await update(ref(db, `rooms/${roomCode}`), { status: 'leaderboard' });
+                    } else {
+                        // Reset submissions for the next round effectively happens because we change currentIndex
+                        await update(ref(db, `rooms/${roomCode}`), { currentIndex: nextIdx, status: 'ranking' });
+                    }
+                }
+            };
+
+            function render() {
+                if (!myName) {
+                    showSection('view-join');
+                    return;
+                }
+
+                if (state.currentIndex === -1) {
+                    showSection('view-setup');
+                    return;
+                }
+
+                if (state.status === 'ranking') {
+                    showSection('view-ranking');
+                    document.getElementById('curr-q').innerText = state.statements[state.currentIndex];
+                    const list = document.getElementById('sortable-list');
+                    
+                    // Only build the list once per round
+                    if (list.getAttribute('data-round') != state.currentIndex) {
+                        list.innerHTML = '';
+                        list.setAttribute('data-round', state.currentIndex);
+                        [...state.participants].sort(() => Math.random() - 0.5).forEach(name => {
+                            const li = document.createElement('li');
+                            li.className = "bg-white p-4 mb-2 rounded-lg shadow border flex justify-between font-bold touch-none";
+                            li.dataset.name = name;
+                            li.innerHTML = `<span>${name}</span> <span class="text-slate-300">☰</span>`;
+                            list.appendChild(li);
+                        });
+                        new Sortable(list, { animation: 150 });
+                    }
+                }
+
+                if (state.status === 'discussion') {
+                    showSection('view-discussion');
+                    const roundSubs = state.submissions?.[state.currentIndex] || {};
+                    const roundTotals = {};
+                    state.participants.forEach(p => roundTotals[p] = 0);
+                    
+                    Object.values(roundSubs).forEach(ranking => {
+                        ranking.forEach((name, index) => {
+                            if(roundTotals[name] !== undefined) roundTotals[name] += (state.participants.length - index);
+                        });
+                    });
+
+                    const winner = Object.keys(roundTotals).reduce((a, b) => roundTotals[a] > roundTotals[b] ? a : b, state.participants[0]);
+                    document.getElementById('round-winner').innerText = winner;
+                    document.getElementById('host-controls').classList.toggle('hidden', !isHost);
+                    document.getElementById('player-wait-msg').classList.toggle('hidden', isHost);
+                }
+
+                if (state.status === 'leaderboard') {
+                    showSection('view-leaderboard');
+                    const grandTotals = {};
+                    state.participants.forEach(p => grandTotals[p] = 0);
+
+                    // Loop through all rounds and all user submissions
+                    Object.values(state.submissions || {}).forEach(round => {
+                        Object.values(round).forEach(ranking => {
+                            ranking.forEach((name, index) => {
+                                if(grandTotals[name] !== undefined) grandTotals[name] += (state.participants.length - index);
+                            });
+                        });
+                    });
+
+                    const sorted = Object.entries(grandTotals).sort((a,b) => b[1] - a[1]);
+                    document.getElementById('final-list').innerHTML = sorted.map(([name, pts], i) => `
+                        <div class="flex justify-between p-4 border-b ${i===0?'bg-yellow-50':''}">
+                            <span>${i+1}. <b>${name}</b></span>
+                            <span class="text-indigo-600 font-bold">${pts} pts</span>
+                        </div>
+                    `).join('');
+                }
+            }
+
+            // Initial Draw
+            render();
+
+        } catch (e) {
+            document.getElementById('debug-log').innerText = "Script Start Error: " + e.message;
+        }
+    </script>
 </body>
 </html>
