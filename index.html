@@ -6,68 +6,50 @@
     <title>Ranking the Stars Live</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
-    <!-- Firebase SDKs updated -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getDatabase, ref, set, onValue, update, push, get } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+        import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-        // --- PASTE YOUR FIREBASE CONFIG HERE ---
+        // --- UPDATED CONFIG ---
         const firebaseConfig = {
-        apiKey: "AIzaSyBBFLAz3arcUWPR2zu_ah97OpQrP52NFWU",
-        authDomain: "ranking-the-stars---ci.firebaseapp.com",
-        projectId: "ranking-the-stars---ci",
-        storageBucket: "ranking-the-stars---ci.firebasestorage.app",
-        messagingSenderId: "944109602386",
-        appId: "1:944109602386:web:605a8f11befdc32d8d418b",
-        measurementId: "G-SWVECSX8ZH"
+            apiKey: "AIzaSyBBFLAz3arcUWPR2zu_ah97OpQrP52NFWU",
+            authDomain: "ranking-the-stars---ci.firebaseapp.com",
+            // This line below is essential for Realtime Database!
+            databaseURL: "https://ranking-the-stars---ci-default-rtdb.firebaseio.com", 
+            projectId: "ranking-the-stars---ci",
+            storageBucket: "ranking-the-stars---ci.firebasestorage.app",
+            messagingSenderId: "944109602386",
+            appId: "1:944109602386:web:605a8f11befdc32d8d418b",
+            measurementId: "G-SWVECSX8ZH"
         };
 
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
 
-        // --- APP LOGIC ---
-        let roomCode = "TEAM_EVENT"; // Simple fixed room code for this event
+        let roomCode = "TEAM_EVENT"; 
         let myName = localStorage.getItem('player_name') || "";
         let isHost = false;
 
         const state = {
-            view: 'join',
             participants: [],
             statements: [],
             currentIndex: -1,
-            submissions: {} 
+            submissions: {},
+            status: 'setup'
         };
 
-        // Sync State from Firebase
+        // Listen for data
         onValue(ref(db, `rooms/${roomCode}`), (snapshot) => {
             const data = snapshot.val();
-            if (!data) return;
-            
-            state.participants = data.participants || [];
-            state.statements = data.statements || [];
-            state.currentIndex = data.currentIndex ?? -1;
-            state.status = data.status; // 'setup', 'ranking', 'discussion', 'leaderboard'
-
+            if (data) {
+                state.participants = data.participants || [];
+                state.statements = data.statements || [];
+                state.currentIndex = data.currentIndex ?? -1;
+                state.status = data.status;
+                state.submissions = data.submissions || {};
+            }
             render();
         });
-
-        // --- FUNCTIONS ---
-
-        window.createGame = async () => {
-            const names = document.getElementById('input-names').value.split('\n').filter(n => n.trim());
-            const qs = document.getElementById('input-statements').value.split('\n').filter(s => s.trim());
-            
-            if (names.length < 2) return alert("Add more names!");
-            
-            isHost = true;
-            await set(ref(db, `rooms/${roomCode}`), {
-                participants: names.map(n => n.trim()),
-                statements: qs.map(q => q.trim()),
-                currentIndex: 0,
-                status: 'ranking',
-                submissions: {}
-            });
-        };
 
         window.joinGame = () => {
             const nameInput = document.getElementById('join-name').value.trim();
@@ -77,15 +59,26 @@
             render();
         };
 
+        window.createGame = async () => {
+            const names = document.getElementById('input-names').value.split('\n').filter(n => n.trim());
+            const qs = document.getElementById('input-statements').value.split('\n').filter(s => s.trim());
+            if (names.length < 2) return alert("Add more names!");
+            
+            isHost = true;
+            await set(ref(db, `rooms/${roomCode}`), {
+                participants: names.map(n => n.trim()),
+                statements: qs.map(q => q.trim()),
+                currentIndex: 0,
+                status: 'ranking'
+            });
+        };
+
         window.submitRank = async () => {
             const listItems = Array.from(document.querySelectorAll('#sortable-list li'));
             const ranking = listItems.map(li => li.dataset.name);
-            
-            // Push individual submission
-            await set(ref(db, `rooms/${roomCode}/submissions/${state.currentIndex}/${myName.replace(/\./g, '_')}`), ranking);
-            
-            // Mark as waiting
-            document.getElementById('ranking-area').innerHTML = `<div class="p-10 text-center font-bold">Waiting for others...</div>`;
+            const safeName = myName.replace(/[.#$\[\]]/g, "_"); 
+            await set(ref(db, `rooms/${roomCode}/submissions/${state.currentIndex}/${safeName}`), ranking);
+            document.getElementById('ranking-area').innerHTML = `<div class="p-10 text-center font-bold text-indigo-600">Ranking submitted!<br>Waiting for the rest...</div>`;
         };
 
         window.nextStep = async () => {
@@ -101,62 +94,37 @@
             }
         };
 
-        function calculateScores() {
-            const totals = {};
-            state.participants.forEach(p => totals[p] = 0);
-
-            // For every statement
-            for (let i = 0; i <= state.currentIndex; i++) {
-                const roundSubs = state.submissions?.[i] || {};
-                const subCount = Object.keys(roundSubs).length;
-                
-                // For every person's individual submission
-                Object.values(roundSubs).forEach(ranking => {
-                    ranking.forEach((name, index) => {
-                        // Point system: #1 rank = highest points
-                        const points = state.participants.length - index;
-                        if (totals[name] !== undefined) totals[name] += points;
-                    });
-                });
-            }
-            return totals;
-        }
-
         function render() {
-            const container = document.getElementById('app');
-            
-            // Join View
+            // 1. Show Join View if no name
             if (!myName) {
                 showSection('view-join');
                 return;
             }
 
-            // Setup View (only if no game exists)
+            // 2. Show Setup View if game hasn't started
             if (state.currentIndex === -1) {
                 showSection('view-setup');
                 return;
             }
 
-            // Ranking View
+            // 3. Ranking View
             if (state.status === 'ranking') {
                 showSection('view-ranking');
                 document.getElementById('curr-q').innerText = state.statements[state.currentIndex];
                 const list = document.getElementById('sortable-list');
-                list.innerHTML = '';
-                
-                // Shuffle names for fair start
-                [...state.participants].sort(() => Math.random() - 0.5).forEach(name => {
-                    const li = document.createElement('li');
-                    li.className = "bg-white p-4 mb-2 rounded-lg shadow border flex justify-between touch-none";
-                    li.dataset.name = name;
-                    li.innerHTML = `<span>${name}</span> <span class="text-slate-300">☰</span>`;
-                    list.appendChild(li);
-                });
-
-                new Sortable(list, { animation: 150 });
+                if (list.children.length === 0) { // Only populate if empty to prevent jumping while dragging
+                    [...state.participants].sort(() => Math.random() - 0.5).forEach(name => {
+                        const li = document.createElement('li');
+                        li.className = "bg-white p-4 mb-2 rounded-lg shadow border flex justify-between touch-none font-bold";
+                        li.dataset.name = name;
+                        li.innerHTML = `<span>${name}</span> <span class="text-slate-300 text-xl">≡</span>`;
+                        list.appendChild(li);
+                    });
+                    new Sortable(list, { animation: 150 });
+                }
             }
 
-            // Discussion View
+            // 4. Discussion View
             if (state.status === 'discussion') {
                 showSection('view-discussion');
                 const roundSubs = state.submissions?.[state.currentIndex] || {};
@@ -165,23 +133,30 @@
                 
                 Object.values(roundSubs).forEach(ranking => {
                     ranking.forEach((name, index) => {
-                        roundTotals[name] += (state.participants.length - index);
+                        if(roundTotals[name] !== undefined) roundTotals[name] += (state.participants.length - index);
                     });
                 });
 
-                const winner = Object.keys(roundTotals).reduce((a, b) => roundTotals[a] > roundTotals[b] ? a : b);
+                const winner = Object.keys(roundTotals).reduce((a, b) => roundTotals[a] > roundTotals[b] ? a : b, state.participants[0]);
                 document.getElementById('round-winner').innerText = winner;
                 document.getElementById('host-controls').classList.toggle('hidden', !isHost);
             }
 
-            // Leaderboard
+            // 5. Leaderboard
             if (state.status === 'leaderboard') {
                 showSection('view-leaderboard');
-                const scores = calculateScores();
-                const sorted = Object.entries(scores).sort((a,b) => b[1] - a[1]);
-                const list = document.getElementById('final-list');
-                list.innerHTML = sorted.map(([name, pts], i) => `
-                    <div class="flex justify-between p-3 border-b">
+                const totals = {};
+                state.participants.forEach(p => totals[p] = 0);
+                Object.values(state.submissions || {}).forEach(round => {
+                    Object.values(round).forEach(ranking => {
+                        ranking.forEach((name, index) => {
+                            if(totals[name] !== undefined) totals[name] += (state.participants.length - index);
+                        });
+                    });
+                });
+                const sorted = Object.entries(totals).sort((a,b) => b[1] - a[1]);
+                document.getElementById('final-list').innerHTML = sorted.map(([name, pts], i) => `
+                    <div class="flex justify-between p-4 border-b">
                         <span>${i+1}. <b>${name}</b></span>
                         <span class="text-indigo-600 font-bold">${pts} pts</span>
                     </div>
@@ -194,33 +169,24 @@
             document.getElementById(id).classList.remove('hidden');
         }
 
-        // Initialize local listener
-        onValue(ref(db, `rooms/${roomCode}/submissions`), (snapshot) => {
-            state.submissions = snapshot.val() || {};
-            render();
-        });
+        // START THE APP
+        render();
 
     </script>
-    <style>
-        .sortable-ghost { opacity: 0.3; background: #e2e8f0; }
-    </style>
 </head>
 <body class="bg-slate-100 text-slate-900 font-sans">
-
     <div id="app" class="max-w-md mx-auto p-4">
         
-        <!-- JOIN VIEW -->
         <section id="view-join" class="hidden py-20 text-center">
             <h1 class="text-3xl font-black mb-6 text-indigo-600">Ranking the Stars ⭐</h1>
-            <input id="join-name" type="text" placeholder="Your Name" class="w-full p-4 rounded-xl border mb-4 text-center text-lg">
-            <button onclick="joinGame()" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-bold">Join Game</button>
-            <p class="mt-8 text-sm text-slate-400">If you are the host, add names/statements below.</p>
-            <button onclick="document.getElementById('view-setup').classList.remove('hidden')" class="text-xs text-slate-400 underline mt-2">Open Host Setup</button>
+            <input id="join-name" type="text" placeholder="Your Name" class="w-full p-4 rounded-xl border mb-4 text-center text-lg shadow-sm">
+            <button onclick="joinGame()" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-bold shadow-lg active:scale-95 transition">Join Game</button>
+            <button onclick="document.getElementById('view-setup').classList.remove('hidden'); document.getElementById('view-join').classList.add('hidden');" class="text-xs text-slate-400 underline mt-10 block w-full text-center">I am the Host (Setup)</button>
         </section>
 
-        <!-- SETUP VIEW (Admin) -->
         <section id="view-setup" class="hidden space-y-4">
             <h2 class="text-xl font-bold">Host Setup</h2>
+            <p class="text-sm text-slate-500">Configure the game for everyone.</p>
             <div>
                 <label class="text-xs font-bold uppercase">Participants (one per line)</label>
                 <textarea id="input-names" rows="5" class="w-full p-2 border rounded">Alex\nJordan\nTaylor\nCharlie\nCasey\nSam\nRobin\nMorgan\nKelly\nPat\nJessie\nDana</textarea>
@@ -232,7 +198,6 @@
             <button onclick="createGame()" class="w-full bg-black text-white p-4 rounded-xl font-bold">Launch Game for Everyone</button>
         </section>
 
-        <!-- RANKING VIEW -->
         <section id="view-ranking" class="hidden">
             <div class="bg-indigo-600 text-white p-6 rounded-2xl mb-6 shadow-lg">
                 <p class="text-xs opacity-75 uppercase mb-1">Statement:</p>
@@ -245,22 +210,18 @@
             </div>
         </section>
 
-        <!-- DISCUSSION VIEW -->
         <section id="view-discussion" class="hidden text-center py-10">
             <h2 class="text-xl font-bold mb-4">The Group's Consensus:</h2>
             <div class="bg-yellow-100 border-4 border-yellow-400 p-8 rounded-3xl mb-8">
                 <p class="text-yellow-800 uppercase text-xs font-black tracking-widest mb-2">Ranked #1 Overall</p>
                 <p id="round-winner" class="text-5xl font-black text-yellow-900"></p>
             </div>
-            <p class="italic text-slate-500 mb-10">"Why does everyone think it's this person?"</p>
-            
             <div id="host-controls" class="hidden">
                 <button onclick="nextStep()" class="w-full bg-indigo-600 text-white p-4 rounded-xl font-bold">Next Question</button>
             </div>
-            <p id="wait-msg" class="text-sm text-slate-400">Host will advance the game shortly...</p>
+            <p class="text-sm text-slate-400 mt-4">Waiting for host to proceed...</p>
         </section>
 
-        <!-- LEADERBOARD VIEW -->
         <section id="view-leaderboard" class="hidden">
             <h2 class="text-3xl font-black text-center mb-8">Final Results 🏆</h2>
             <div id="final-list" class="bg-white rounded-2xl shadow overflow-hidden"></div>
