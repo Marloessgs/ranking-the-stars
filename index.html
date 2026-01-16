@@ -249,12 +249,20 @@
                 });
                 const sortedRanking = Object.entries(roundTotals).sort((a, b) => b[1] - a[1]); // highest points first
                 document.getElementById('round-ranking').innerHTML =
-                    sortedRanking.map(([name, pts], idx) => `
-                        <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border">
-                        <span class="font-black text-lg">${idx + 1}. ${name}</span>
-                        <span class="text-sm font-bold text-indigo-600">${pts} pts</span>
-                        </div>
-                    `).join('');
+                    sortedRanking.map(([name, pts], idx) => {
+                        const highlightClass =
+                            idx === 0 ? 'bg-yellow-100 border-yellow-300' :
+                            idx === 1 ? 'bg-slate-100 border-slate-300' :
+                            idx === 2 ? 'bg-orange-100 border-orange-300' :
+                            'bg-white border-slate-200';
+
+                        return `
+                            <div class="flex justify-between items-center p-4 rounded-2xl shadow-sm border ${highlightClass}">
+                                <span class="font-black text-lg">${idx + 1}. ${name}</span>
+                                <span class="text-sm font-bold text-indigo-600">${pts} pts</span>
+                            </div>
+                        `;
+                    }).join('');
                 document.getElementById('host-controls-next').classList.toggle('hidden', !isHost);
                 document.getElementById('player-wait-msg').classList.toggle('hidden', isHost);
             }
