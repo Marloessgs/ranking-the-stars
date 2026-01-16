@@ -88,7 +88,7 @@
             <h2 class="text-lg font-bold text-slate-400 uppercase tracking-widest mb-4">Group Consensus #1:</h2>
             <div class="bg-yellow-400 p-1 rounded-3xl shadow-xl mb-8">
                 <div class="bg-white p-8 rounded-[22px] border-4 border-yellow-200">
-                    <p id="round-winner" class="text-4xl font-black text-slate-900 leading-tight"></p>
+                    <div id="round-ranking" class="space-y-3"></div>
                 </div>
             </div>
             <div id="host-controls-next" class="hidden">
@@ -247,8 +247,14 @@
                 Object.values(roundSubs).forEach(rank => {
                     rank.forEach((name, idx) => { if(roundTotals[name] !== undefined) roundTotals[name] += (state.participants.length - idx); });
                 });
-                const winner = Object.keys(roundTotals).reduce((a, b) => roundTotals[a] > roundTotals[b] ? a : b, state.participants[0]);
-                document.getElementById('round-winner').innerText = winner;
+                const sortedRanking = Object.entries(roundTotals).sort((a, b) => b[1] - a[1]); // highest points first
+                document.getElementById('round-ranking').innerHTML =
+                    sortedRanking.map(([name, pts], idx) => `
+                        <div class="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border">
+                        <span class="font-black text-lg">${idx + 1}. ${name}</span>
+                        <span class="text-sm font-bold text-indigo-600">${pts} pts</span>
+                        </div>
+                    `).join('');
                 document.getElementById('host-controls-next').classList.toggle('hidden', !isHost);
                 document.getElementById('player-wait-msg').classList.toggle('hidden', isHost);
             }
